@@ -1,0 +1,18 @@
+conf:
+  log:
+    category: mktpub
+    location: /var/log/saifu/mktpub
+    level: INFO
+    stdout_level: ERROR
+    format: '%(asctime)s [%(levelname)s] [@%(name)s] %(message)s'
+  app:
+    pull_delay: 10
+    pub:
+      type: rmq
+      settings:
+        host: 163.172.141.210
+        exchange: mktupd
+    res: https://min-api.cryptocompare.com/data/pricemulti?fsyms={sources}&tsyms={targets}
+    ccy:
+      sources: [ BTC, ETH, XMR, ETC, XRP ]
+      targets: [ USD, EUR, GBP ]

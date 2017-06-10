@@ -1,0 +1,16 @@
+conf:
+  log:
+    category: mktagg
+    location: /var/log/saifu/mktagg
+    level: INFO
+    stdout_level: ERROR
+    format: '%(asctime)s [%(levelname)s] [@%(name)s] %(message)s'
+  app:
+    mq:
+      host: rmq
+      sub_exchange: mktupd
+      pub_exchange: mktupdagg
+      creds:
+        username: guest
+        password: guest
+    agg_window: 30

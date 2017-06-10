@@ -1,0 +1,27 @@
+version: '3'
+services:
+  rmq:
+    image: rabbitmq:3-management
+    ports:
+      - '8080:15672'
+      - '5672:5672'
+      - '5671:5671'
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+  redis:
+    image: redis:alpine
+  mktpub:
+    build: ./mktpub
+    image: saifu/mktpub
+    environment:
+      MKTPUB_ENV: dev
+    depends_on:
+      - rmq
+  mktagg:
+    build: ./mktagg
+    image: saifu/mktagg
+    environment:
+      MKTAGG_ENV: dev
+    depends_on:
+      - rmq
