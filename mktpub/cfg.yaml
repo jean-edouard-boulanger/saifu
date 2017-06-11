@@ -8,10 +8,8 @@ conf:
   app:
     pull_delay: 10
     pub:
-      type: rmq
-      settings:
-        host: 163.172.141.210
-        exchange: mktupd
+      host: 163.172.141.210
+      exchange: mktupd
     res: https://min-api.cryptocompare.com/data/pricemulti?fsyms={sources}&tsyms={targets}
     ccy:
       sources: [ BTC, ETH, XMR, ETC, XRP ]

@@ -4,14 +4,12 @@ import time
 import sys
 import json
 import yaml
-import requests
 import pika
-
-
-HTTP_STATUS_CODE_OK = 200
+import quotesrequester
 
 
 class Settings(object):
+    """Application settings"""
     def __init__(self, store):
         conf = store["conf"]
 
@@ -24,123 +22,55 @@ class Settings(object):
 
         app = conf["app"]
         self.pull_delay = app["pull_delay"]
-        self.publisher_type = app["pub"]["type"]
-        self.publisher_settings = app["pub"]["settings"]
+
+        pub = app["pub"]
+        self.pub_host = pub["host"]
+        self.pub_exchange = pub["exchange"]
+        self.pub_creds = pub["creds"]
 
         self.resource = app["res"]
         self.source_ccys = app["ccy"]["sources"]
         self.target_ccys = app["ccy"]["targets"]
 
 
-def extract_pairs(tsp, data):
-    """Extract the currency pairs from a response"""
-    for source, targets in data.iteritems():
-        for target, price in targets.iteritems():
-            yield {
-                "source": source,
-                "target": target,
-                "rate": price,
-                "timestamp": tsp
-            }
+class Publisher(object):
+    """Publishes aggregated updates"""
+    def __init__(self, logger, host, exchange, creds):
+        self.logger = logger
 
-
-class QuotesRequester(object):
-    def __init__(self, resource):
-        self.resource = resource
-
-    def __call__(self):
-        try:
-            response = requests.post(self.resource)
-            if response.status_code != HTTP_STATUS_CODE_OK:
-                raise RuntimeError("Service responded with an error (rc={})".format(
-                    response.status_code))
-            else:
-                data = response.json()
-                for pair in extract_pairs(timestamp(), data):
-                    yield pair
-        except Exception as error:
-            raise RuntimeError("Unable to send request to service ({})".format(
-                str(error)))
-
-
-class StdoutPublisher(object):
-    def __init__(self):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type, value, traceback):
-        pass
-
-    def __call__(self, data):
-        print data
-
-
-class RmqPublisher(object):
-    def __init__(self, host, exchange, creds):
         self.connection = None
         self.channel = None
-
         self.host = host
         self.exchange = exchange
-        self.username = creds["username"]
-        self.password = creds["password"]
+        self.creds = creds
 
-    def __enter__(self):
+        self._connect()
+
+    def _connect(self):
         self.connection = pika.BlockingConnection(
             pika.ConnectionParameters(
                 host=self.host,
                 credentials=pika.credentials.PlainCredentials(
-                    username=self.username,
-                    password=self.password)))
+                    username=self.creds["username"],
+                    password=self.creds["password"])))
 
         self.channel = self.connection.channel()
         self.channel.exchange_declare(
             exchange=self.exchange,
             type='fanout')
 
-        return self
+    def publish(self, quote):
+        """Publishes quotes to the exchange"""
+        try:
+            self.channel.basic_publish(
+                exchange=self.exchange,
+                routing_key='',
+                body=json.dumps(quote.serialize()))
+        except pika.exceptions.ConnectionClosed:
+            self.logger.warn("""Lost connection with MQ, trying to reconnect""")
+            self._connect()
+            self.logger.warn("Connection to MQ is back")
 
-    def __exit__(self, type, value, traceback):
-        self.connection.close()
-
-    def __call__(self, data):
-        self.channel.basic_publish(
-            exchange=self.exchange,
-            routing_key='',
-            body=json.dumps(data))
-
-
-def build_url(base, sources, targets):
-    """Builds resource url from settings"""
-    return base.format(**{
-        "sources": ",".join(sources),
-        "targets": ",".join(targets)
-    })
-
-def timestamp():
-    """Returns the current timestamp in local time"""
-    return int(time.time())
-
-def create_publisher(of_type, settings):
-    """Creates a publisher with the settings"""
-    publishers = {
-        'stdout': StdoutPublisher,
-        'rmq': RmqPublisher
-    }
-    return publishers[of_type](**settings)
-
-def log_level_from_string(level_string):
-    """Get python logging from string"""
-    mapping = {
-        "debug": logging.DEBUG,
-        "info": logging.INFO,
-        "warn": logging.WARN,
-        "error": logging.ERROR,
-        "critical": logging.CRITICAL
-    }
-    return mapping[level_string]
 
 def create_logger(settings):
     """Creates the application logger from the settings"""
@@ -155,19 +85,23 @@ def create_logger(settings):
 
     return logger
 
-def main_loop(logger, publisher, requester):
+def main_loop(logger, publisher, requester, settings):
     """Main loop execution"""
     try:
-        for pair in requester():
+        sources = settings.source_ccys
+        targets = settings.target_ccys
+
+        for pair in requester.get(sources, targets):
             logger.debug("Publishing currency pair {}{}@{} (ts={})".format(
-                pair["source"],
-                pair["target"],
-                pair["rate"],
-                pair["timestamp"]
+                pair.source,
+                pair.target,
+                pair.price,
+                pair.timestamp
             ))
-            publisher(pair)
-    except RuntimeError as error:
-        logger.warn("Failed to get quotes from service ({})".format(error))
+            publisher.publish(pair)
+    except quotesrequester.RequesterException as error:
+        logger.warn("Failed to get quotes ({})".format(error))
+
 
 def main():
     """Application entry-point"""
@@ -180,19 +114,17 @@ def main():
 
     logger.info("Initializing mktpub")
 
-    request_url = build_url(
-        settings.resource,
-        settings.source_ccys,
-        settings.target_ccys)
+    requester = quotesrequester.Requester(logger, settings.resource)
+    publisher = Publisher(
+        logger,
+        settings.pub_host,
+        settings.pub_exchange,
+        settings.pub_creds)
 
-    requester = QuotesRequester(request_url)
-
-    pub_type = settings.publisher_type
-    with create_publisher(pub_type, settings.publisher_settings) as publisher:
-        logger.info("Ready")
-        while True:
-            main_loop(logger, publisher, requester)
-            time.sleep(settings.pull_delay)
+    logger.info("Publisher is ready to operate")
+    while True:
+        main_loop(logger, publisher, requester, settings)
+        time.sleep(settings.pull_delay)
 
 if __name__ == "__main__":
     main()

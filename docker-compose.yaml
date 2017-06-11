@@ -9,8 +9,15 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
-  redis:
-    image: redis:alpine
+#  redis:
+#    image: redis:alpine
+  saifudb:
+    build: ./saifudb
+    image: saifu/saifudb
+    environment:
+      POSTGRES_DB: saifudb
+      POSTGRES_USER: guest
+      POSTGRES_PASSWORD: guest
   mktpub:
     build: ./mktpub
     image: saifu/mktpub
@@ -18,6 +25,7 @@ services:
       MKTPUB_ENV: dev
     depends_on:
       - rmq
+      - saifudb
   mktagg:
     build: ./mktagg
     image: saifu/mktagg
@@ -25,3 +33,4 @@ services:
       MKTAGG_ENV: dev
     depends_on:
       - rmq
+      - saifudb
