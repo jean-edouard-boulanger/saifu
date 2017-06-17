@@ -1,15 +1,16 @@
 conf:
-  logging:
-    category: mktpub
-    location: /var/log/saifu/mktpub
+  log:
+    category: mktagg
+    location: /var/log/saifu/mktagg
     level: INFO
-    stdout-level: ERROR
-    format: '%(asctime)s [%(levelname)s] [@%(name)s] %(message)s'
+    stdout_level: ERROR
+    format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
-    pub:
-      type: rmq
-      settings:
-        host: 163.172.141.210
-        sub-exchange: mktupd
-        pub-exchange: mktaggupd
-    agg-window-s: 60
+    mq:
+      host: 163.172.141.210
+      sub_exchange: mktupd
+      pub_exchange: mktaggupd
+      creds:
+        username: guest
+        password: guest
+    agg_window: 60

@@ -16,14 +16,14 @@ def _get_timestamp():
     return int(time.time())
 
 
-def _connect(settings):
+def _exchange_connect(settings):
     """Creates a connection to message queue broker from settings"""
     conn = pika.BlockingConnection(
         pika.ConnectionParameters(
             host=settings.mq_host,
             credentials=pika.credentials.PlainCredentials(
-                username=settings.mq_username,
-                password=settings.mq_password)))
+                username=settings.mq_creds["username"],
+                password=settings.mq_creds["password"])))
     return conn
 
 
@@ -62,8 +62,7 @@ class Settings(object):
 
         mqc = app["mq"]
         self.mq_host = mqc["host"]
-        self.mq_username = mqc["creds"]["username"]
-        self.mq_password = mqc["creds"]["password"]
+        self.mq_creds = mqc["creds"]
         self.mq_sub_exchange = mqc["sub_exchange"]
         self.mq_pub_exchange = mqc["pub_exchange"]
 
@@ -72,21 +71,23 @@ class Subscriber(threading.Thread):
     """Asynchronously subscribes to quotes updates and aggregates data"""
     def __init__(self, logger, settings, callback):
         super(Subscriber, self).__init__()
-        self.connection = None
-        self.channel = None
-
         self.logger = logger
         self.settings = settings
         self.callback = callback
         self.agg = Aggregation()
         self.nextbatch = _get_timestamp() + self.settings.agg_window
-
         self.working = True
 
-        self._connect()
+        self.connection = None
+        self.exchange = None
 
     def _connect(self):
-        self.connection = _connect(self.settings)
+        self.connection = _exchange_connect(self.settings)
+        self.channel = self.connection.channel()
+        self.channel.exchange_declare(
+            exchange=self.settings.mq_sub_exchange,
+            type='fanout')
+        return self.connection, self.channel
 
     def _received(self, channel, method, properties, body):
         """Callback when message received"""
@@ -119,32 +120,25 @@ class Subscriber(threading.Thread):
                 datetime.datetime.fromtimestamp(self.nextbatch)))
 
     def stop(self):
-        """Stops the thread"""
+        """Stops the subscriber thread"""
         self.working = False
         self.channel.stop_consuming()
 
     def run(self):
-        self.channel = self.connection.channel()
-        self.channel.exchange_declare(
-            exchange=self.settings.mq_sub_exchange,
-            type='fanout')
-
-        result = self.channel.queue_declare(exclusive=True)
-        queue_name = result.method.queue
-
-        self.channel.queue_bind(
-            exchange=self.settings.mq_sub_exchange,
-            queue=queue_name)
-
-        self.channel.basic_consume(self._received, queue=queue_name, no_ack=True)
-
         while self.working:
             try:
-                self.channel.start_consuming()
+                self.logger.info("Subscriber connecting to MQ broker")
+                _, channel = self._connect()
+                queue_name = channel.queue_declare(exclusive=True).method.queue
+                channel.basic_consume(self._received, queue=queue_name, no_ack=True)
+                channel.queue_bind(
+                    exchange=self.settings.mq_sub_exchange,
+                    queue=queue_name)
+
+                channel.start_consuming()
             except pika.exceptions.ConnectionClosed:
-                self.logger.warn("Lost connection with MQ, trying to reconnect")
-                self._connect()
-                self.logger.info("Connection to MQ is back")
+                self.logger.warn("Lost connection with MQ, will reconnect")
+
         self.logger.info("Subscriber is going down")
 
 
@@ -152,17 +146,35 @@ class Publisher(threading.Thread):
     """Asynchronously publishes aggregated data updates"""
     def __init__(self, logger, settings):
         super(Publisher, self).__init__()
-        self.connection = _connect(settings)
-        self.channel = self.connection.channel()
-        self.channel.exchange_declare(
-            exchange=settings.mq_pub_exchange,
-            type='fanout')
-
-        self.queue = Queue.Queue()
         self.logger = logger
+        self.settings = settings
+        self.queue = Queue.Queue()
         self.working = True
 
+    def _connect(self):
+        connection = _exchange_connect(self.settings)
+        channel = connection.channel()
+        channel.exchange_declare(
+            exchange=self.settings.mq_pub_exchange,
+            type='fanout')
+        return connection, channel
+
+    def _do_run(self, channel):
+        wait = 5
+        while True:
+            try:
+                updates = self.queue.get(timeout=wait)
+                self.logger.debug("Will publish update for {} pairs".format(
+                    len(updates)))
+                channel.basic_publish(
+                    exchange=self.settings.mq_pub_exchange,
+                    routing_key='',
+                    body=json.dumps(updates))
+            except Queue.Empty:
+                self.logger.debug("Queue is empty after {}s".format(wait))
+
     def stop(self):
+        """Stops the publisher thread"""
         self.working = False
 
     def notify(self, update):
@@ -170,19 +182,17 @@ class Publisher(threading.Thread):
         self.queue.put(update)
 
     def run(self):
-        wait = 5
         while self.working:
             try:
-                updates = self.queue.get(timeout=wait)
-                self.logger.debug("Received {} updates for: {}".format(
-                    len(updates),
-                    ", ".join(updates.keys())))
-            except Queue.Empty:
-                self.logger.debug("Update queue is empty after {}s".format(wait))
+                self.logger.info("Publisher connecting to MQ broker")
+                _, channel = self._connect()
+                self._do_run(channel)
+            except pika.exceptions.ConnectionClosed:
+                self.logger.warn("Lost connection with MQ, will reconnect")
 
         self.logger.info("Publisher is going down")
 
-def create_logger(settings):
+def _create_logger(settings):
     """Creates the application logger from the settings"""
     logger = logging.getLogger(settings.log_category)
     logger.setLevel(logging.DEBUG)
@@ -203,7 +213,7 @@ def main():
         settings_data = yaml.load(settings_file)
 
     settings = Settings(settings_data)
-    logger = create_logger(settings)
+    logger = _create_logger(settings)
 
     logger.info("Initializing mktagg")
 
@@ -218,7 +228,8 @@ def main():
     threads.append(subscriber)
 
     logger.info("Starting worker threads")
-    [t.start() for t in threads]
+    for worker in threads:
+        worker.start()
 
     logger.info("Market data aggregator is ready to operate")
 
@@ -226,7 +237,8 @@ def main():
     while should_monitor:
         if not all([t.isAlive() for t in threads]):
             logger.warn("Detected a thread died, stopping mktagg")
-            [t.stop() for t in threads]
+            for worker in threads:
+                worker.stop()
             should_monitor = False
         else:
             time.sleep(5)

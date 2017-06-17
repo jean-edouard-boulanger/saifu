@@ -51,6 +51,13 @@ def _get_message_from_response(response):
         return "unknown"
     return response["Message"]
 
+def _extract_sources_targets(pairs):
+    sources = set()
+    targets = set()
+    for source, target in pairs:
+        sources.add(source)
+        targets.add(target)
+    return sources, targets
 
 class RequesterException(Exception):
     """Thrown when an error occurs in quotes requester"""
@@ -67,8 +74,9 @@ class Requester(object):
         self.resource = resource
         self.logger = logger
 
-    def get(self, sources, targets):
+    def get(self, pairs):
         """Gets the quotes for the sources and targets currency pairs"""
+        sources, targets = _extract_sources_targets(pairs)
         resource = _build_uri(self.resource, sources, targets)
         self.logger.debug("Will fetch quotes from {}".format(resource))
         try:

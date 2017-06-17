@@ -25,12 +25,18 @@ services:
       MKTPUB_ENV: dev
     depends_on:
       - rmq
+  mktagg:
+    build: ./mktagg
+    image: saifu/mktagg
+    environment:
+      MKTAGG_ENV: dev
+    depends_on:
+      - rmq
+  ingesticks:
+    build: ./ingesticks
+    image: saifu/ingesticks
+    environment:
+      INGESTICKS_ENV: dev
+    depends_on:
+      - rmq
       - saifudb
-  #mktagg:
-  #  build: ./mktagg
-  #  image: saifu/mktagg
-  #  environment:
-  #    MKTAGG_ENV: dev
-  #  depends_on:
-  #    - rmq
-  #    - saifudb

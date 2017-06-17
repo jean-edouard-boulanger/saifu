@@ -8,6 +8,21 @@ import pika
 import quotesrequester
 
 
+def _exchange_connect(settings):
+    connection = pika.BlockingConnection(
+        pika.ConnectionParameters(
+            host=settings.pub_host,
+            credentials=pika.credentials.PlainCredentials(
+                username=settings.pub_creds["username"],
+                password=settings.pub_creds["password"])))
+
+    channel = connection.channel()
+    channel.exchange_declare(
+        exchange=settings.pub_exchange,
+        type='fanout')
+
+    return connection, channel
+
 class Settings(object):
     """Application settings"""
     def __init__(self, store):
@@ -29,48 +44,32 @@ class Settings(object):
         self.pub_creds = pub["creds"]
 
         self.resource = app["res"]
-        self.source_ccys = app["ccy"]["sources"]
-        self.target_ccys = app["ccy"]["targets"]
 
 
 class Publisher(object):
     """Publishes aggregated updates"""
-    def __init__(self, logger, host, exchange, creds):
+    def __init__(self, logger, settings):
         self.logger = logger
+        self.settings = settings
 
         self.connection = None
-        self.channel = None
-        self.host = host
-        self.exchange = exchange
-        self.creds = creds
-
+        self.exchange = None
         self._connect()
 
     def _connect(self):
-        self.connection = pika.BlockingConnection(
-            pika.ConnectionParameters(
-                host=self.host,
-                credentials=pika.credentials.PlainCredentials(
-                    username=self.creds["username"],
-                    password=self.creds["password"])))
-
-        self.channel = self.connection.channel()
-        self.channel.exchange_declare(
-            exchange=self.exchange,
-            type='fanout')
+        self.connection, self.channel = _exchange_connect(self.settings)
 
     def publish(self, quote):
         """Publishes quotes to the exchange"""
         try:
             self.channel.basic_publish(
-                exchange=self.exchange,
+                exchange=self.settings.pub_exchange,
                 routing_key='',
                 body=json.dumps(quote.serialize()))
         except pika.exceptions.ConnectionClosed:
-            self.logger.warn("""Lost connection with MQ, trying to reconnect""")
+            self.logger.warn("Lost connection with MQ, trying to reconnect")
             self._connect()
-            self.logger.warn("Connection to MQ is back")
-
+            self.logger.info("Connection to MQ re-established")
 
 def create_logger(settings):
     """Creates the application logger from the settings"""
@@ -85,13 +84,10 @@ def create_logger(settings):
 
     return logger
 
-def main_loop(logger, publisher, requester, settings):
+def main_loop(logger, publisher, requester, pairs):
     """Main loop execution"""
     try:
-        sources = settings.source_ccys
-        targets = settings.target_ccys
-
-        for pair in requester.get(sources, targets):
+        for pair in requester.get(pairs):
             logger.debug("Publishing currency pair {}{}@{} (ts={})".format(
                 pair.source,
                 pair.target,
@@ -115,15 +111,13 @@ def main():
     logger.info("Initializing mktpub")
 
     requester = quotesrequester.Requester(logger, settings.resource)
-    publisher = Publisher(
-        logger,
-        settings.pub_host,
-        settings.pub_exchange,
-        settings.pub_creds)
+    publisher = Publisher(logger, settings)
+
+    pairs = [tuple(pair.split("_")) for pair in sys.argv[2:]]
 
     logger.info("Publisher is ready to operate")
     while True:
-        main_loop(logger, publisher, requester, settings)
+        main_loop(logger, publisher, requester, pairs)
         time.sleep(settings.pull_delay)
 
 if __name__ == "__main__":

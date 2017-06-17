@@ -1,0 +1,20 @@
+conf:
+  log:
+    category: ingesticks
+    location: /var/log/saifu/ingesticks
+    level: INFO
+    stdout_level: ERROR
+    format: '%(asctime)s [%(levelname)s] [@%(name)s] %(message)s'
+  app:
+    db:
+      host: saifudb
+      schema: saifudb
+      creds:
+        username: guest
+        password: guest
+    mq:
+      host: rmq
+      exchange: mktaggupd
+      creds:
+        username: guest
+        password: guest

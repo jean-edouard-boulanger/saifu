@@ -1,9 +1,9 @@
 #!/bin/bash
 
 CFG_FILE_PATH=./cfg.yaml
-if [[ "$MKTAGG_ENV" -eq "dev" ]]
+if [[ "$INGESTICKS_ENV" -eq "dev" ]]
 then
-    echo "[ WARN ] Will run mktagg in DEV mode."
+    echo "[ WARN ] Will run ingesticks in DEV mode."
     CFG_FILE_PATH=./cfg_dev.yaml
 fi
 
