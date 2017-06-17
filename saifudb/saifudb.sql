@@ -27,12 +27,18 @@ CREATE TABLE saifu_portfolio_historical_prices (
 );
 
 CREATE TABLE saifu_portfolio_pricing_jobs (
-    job_id CHAR(32) PRIMARY KEY,
+    id CHAR(32) PRIMARY KEY,
     portfolio_id int REFERENCES saifu_portfolios(id),
     status CHAR(1) NOT NULL,
     started_by VARCHAR(255) NOT NULL,
+    snapshot_time TIMESTAMP NOT NULL,
     start_time TIMESTAMP NOT NULL DEFAULT NOW(),
     end_time TIMESTAMP
+);
+
+CREATE TABLE saifu_portfolio_pricing_settings (
+    portfolio_id int REFERENCES saifu_portfolios(id),
+    pricing_interval int NOT NULL
 );
 
 CREATE TABLE saifu_ccy_historical_prices (

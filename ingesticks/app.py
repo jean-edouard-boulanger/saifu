@@ -20,10 +20,10 @@ def _exchange_connect(settings):
 
 def _db_connect(settings):
     return psycopg2.connect(
-        database="saifudb",
-        user="guest",
-        password="guest",
-        host="saifudb")
+        database=settings.db_schema,
+        user=settings.db_creds["username"],
+        password=settings.db_creds["password"],
+        host=settings.db_host)
 
 def _create_logger(settings):
     """Creates the application logger from the settings"""
@@ -129,6 +129,7 @@ class Ingester(object):
                 except psycopg2.Error as err:
                     self.logger.warn("Failed to persist ticker {}: {}".format(
                         ticker, str(err)))
+            self.connection.commit()
 
 
 def main():

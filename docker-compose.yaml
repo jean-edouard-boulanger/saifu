@@ -16,8 +16,8 @@ services:
     image: saifu/saifudb
     environment:
       POSTGRES_DB: saifudb
-      POSTGRES_USER: guest
-      POSTGRES_PASSWORD: guest
+      POSTGRES_USER: saifudb
+      POSTGRES_PASSWORD: saifudb
   mktpub:
     build: ./mktpub
     image: saifu/mktpub
@@ -37,6 +37,14 @@ services:
     image: saifu/ingesticks
     environment:
       INGESTICKS_ENV: dev
+    depends_on:
+      - rmq
+      - saifudb
+  schedprice:
+    build: ./schedprice
+    image: saifu/schedprice
+    environment:
+      SCHEDPRICE_ENV: dev
     depends_on:
       - rmq
       - saifudb

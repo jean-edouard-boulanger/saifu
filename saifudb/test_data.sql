@@ -5,3 +5,4 @@ INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'X
 INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'XML', 14000.0);
 INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'ETH', 25.0);
 INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'XBT', 0.71865);
+INSERT INTO saifu_portfolio_pricing_settings (portfolio_id, pricing_interval) VALUES (1, 120);

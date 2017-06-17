@@ -10,8 +10,8 @@ conf:
       host: saifudb
       schema: saifudb
       creds:
-        username: guest
-        password: guest
+        username: saifudb
+        password: saifudb
     mq:
       host: rmq
       exchange: mktaggupd
