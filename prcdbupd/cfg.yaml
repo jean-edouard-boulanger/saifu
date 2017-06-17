@@ -1,0 +1,15 @@
+conf:
+  logging:
+    category: prcdbupd
+    location: /var/log/saifu/mktpub
+    level: INFO
+    stdout-level: ERROR
+    format: '%(asctime)s [%(levelname)s] [@%(name)s] %(message)s'
+  app:
+    pub:
+      type: rmq
+      settings:
+        host: 163.172.141.210
+        sub-exchange: mktupd
+        pub-exchange: mktaggupd
+    agg-window-s: 60
