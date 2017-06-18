@@ -33,3 +33,31 @@ class LoggingSettings(object):
         self.location = data.get("location")
         self.log_format = data.get("format")
         self.level = data.get("level")
+
+class DatabaseSettings(object):
+    """Database connection settings"""
+    def __init__(self, host=None, database=None, credentials=None):
+        self.host = host
+        self.database = database
+        self.credentials = credentials
+
+    def from_json(self, data):
+        """Hydrate the current instance with json data"""
+        self.host = data.get("host")
+        self.database = data.get("database")
+        self.credentials = BasicCredentials()
+        self.credentials.from_json(
+            data.get("credentials"))
+
+class MQSettings(object):
+    """Message queue connection settings"""
+    def __init__(self, host=None, credentials=None):
+        self.host = host
+        self.credentials = credentials
+
+    def from_json(self, data):
+        """Hydrate the current instance with json data"""
+        self.host = data.get("host")
+        self.credentials = BasicCredentials()
+        self.credentials.from_json(
+            data.get("credentials"))

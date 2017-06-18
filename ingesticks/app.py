@@ -8,60 +8,40 @@ import pika
 import yaml
 
 from saifu.core import models, runtime
+from saifu.core.system import mq, db
 
-def _exchange_connect(settings):
-    """Creates a connection to message queue broker from settings"""
-    conn = pika.BlockingConnection(
-        pika.ConnectionParameters(
-            host=settings.mq_host,
-            credentials=pika.credentials.PlainCredentials(
-                username=settings.mq_creds["username"],
-                password=settings.mq_creds["password"])))
-    return conn
-
-def _db_connect(settings):
-    return psycopg2.connect(
-        database=settings.db_schema,
-        user=settings.db_creds["username"],
-        password=settings.db_creds["password"],
-        host=settings.db_host)
-
-
-class Config(object):
+class Settings(object):
     """Configuration for the current application"""
     def __init__(self, store):
         conf = store["conf"]
 
-        log = conf["log"]
-        self.logging = models.LoggingSettings()
-        self.logging.from_json(log)
-
         app = conf["app"]
-        dbc = app["db"]
-        self.db_host = dbc["host"]
-        self.db_schema = dbc["schema"]
-        self.db_creds = dbc["creds"]
+        self.exchange = app["exchange"]
 
-        mqc = app["mq"]
-        self.mq_host = mqc["host"]
-        self.mq_exchange = mqc["exchange"]
-        self.mq_creds = mqc["creds"]
+        self.logging = models.LoggingSettings()
+        self.logging.from_json(conf["logging"])
+
+        self.database = models.DatabaseSettings()
+        self.database.from_json(app["database"])
+
+        self.mq = models.MQSettings()
+        self.mq.from_json(app["mq"])
 
 
 class Subscriber(object):
     """Receives ticker updates and persists them"""
-    def __init__(self, logger, settings, ingester):
+    def __init__(self, logger, connector, ingester, exchange):
         self.logger = logger
-        self.settings = settings
+        self.exchange = exchange
         self.ingester = ingester
+        self.connector = connector
 
     def _connect(self):
-        connection = _exchange_connect(self.settings)
+        self.logger.info("Connecting to MQ broker")
+        connection = self.connector.connect()
         channel = connection.channel()
-        channel.exchange_declare(
-            exchange=self.settings.mq_exchange,
-            type='fanout')
-        return connection, channel
+        channel.exchange_declare(exchange=self.exchange, type='fanout')
+        return channel
 
     def _received(self, channel, method, properties, body):
         updates = cPickle.loads(body)
@@ -71,40 +51,35 @@ class Subscriber(object):
         """Subscriber entry point"""
         while True:
             try:
-                self.logger.info("Connecting to MQ broker")
-                _, channel = self._connect()
+                channel = self._connect()
                 queue_name = channel.queue_declare(exclusive=True).method.queue
                 channel.basic_consume(self._received, queue=queue_name, no_ack=True)
-                channel.queue_bind(
-                    exchange=self.settings.mq_exchange,
-                    queue=queue_name)
-
+                channel.queue_bind(exchange=self.exchange, queue=queue_name)
                 channel.start_consuming()
             except pika.exceptions.ConnectionClosed:
                 self.logger.warn("Lost connection with MQ, will reconnect")
 
 
 class Ingester(object):
-    def __init__(self, logger, settings):
-        self.settings = settings
+    """Ingests quote updates"""
+    def __init__(self, logger, connector):
         self.logger = logger
-        self.connection = _db_connect(settings)
+        self.connection = connector.connect()
 
     def ingest(self, quotes):
-        """Ingests the provided updates"""
-        cursor = self.connection.cursor()
-
+        """Ingests the provided quotes"""
         self.logger.debug("Will ingest {} updates".format(len(quotes)))
-        for quote in quotes:
-            try:
-                cursor.execute(
-                    """INSERT INTO saifu_ccy_historical_prices (
-                          ticker, price, quote_time)
-                            VALUES (%s, %s, %s)""",
-                    (quote.ticker, quote.price, quote.timestamp))
-            except psycopg2.Error as err:
-                self.logger.warn("Failed to persist ticker {}: {}".format(
-                    quote.ticker, str(err)))
+        with self.connection.cursor() as cursor:
+            for quote in quotes:
+                try:
+                    cursor.execute(
+                        """INSERT INTO saifu_ccy_historical_prices (
+                              ticker, price, quote_time)
+                                VALUES (%s, %s, %s)""",
+                        (quote.ticker, quote.price, quote.timestamp))
+                except psycopg2.Error as err:
+                    self.logger.warn("Failed to persist ticker {}: {}".format(
+                        quote.ticker, str(err)))
 
 
 def main():
@@ -113,12 +88,17 @@ def main():
     with open(path) as settings_file:
         settings_data = yaml.load(settings_file)
 
-    config = Config(settings_data)
-    logger = runtime.create_logger(config.logging)
+    settings = Settings(settings_data)
+    logger = runtime.create_logger(settings.logging)
 
-    ingester = Ingester(logger, config)
+    ingester = Ingester(logger, db.Connector(settings.database))
 
-    subscriber = Subscriber(logger, config, ingester)
+    subscriber = Subscriber(
+        logger,
+        mq.Connector(settings.mq),
+        ingester,
+        settings.exchange)
+
     subscriber.run()
 
 if __name__ == '__main__':

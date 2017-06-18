@@ -23,6 +23,7 @@ services:
     image: saifu/mktpub
     environment:
       MKTPUB_ENV: dev
+      MKTPUB_PROCS: 2
     depends_on:
       - rmq
   mktagg:

@@ -1,15 +1,15 @@
 conf:
-  log:
+  logging:
     category: mktpub
     location: /var/log/saifu/mktpub
     level: DEBUG
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
     pull_delay: 10
-    pub:
+    res: https://min-api.cryptocompare.com/data/pricemulti?fsyms={sources}&tsyms={targets}
+    exchange: mktupd
+    mq:
       host: rmq
-      exchange: mktupd
-      creds:
+      credentials:
         username: guest
         password: guest
-    res: https://min-api.cryptocompare.com/data/pricemulti?fsyms={sources}&tsyms={targets}

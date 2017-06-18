@@ -52,13 +52,14 @@ class Requester(object):
 
     _HTTP_STATUS_CODE_OK = 200
 
-    def __init__(self, logger, resource):
+    def __init__(self, logger, resource, pairs):
         self.resource = resource
+        self.pairs = pairs
         self.logger = logger
 
-    def get(self, pairs):
+    def get(self):
         """Gets the quotes for the sources and targets currency pairs"""
-        sources, targets = _extract_sources_targets(pairs)
+        sources, targets = _extract_sources_targets(self.pairs)
         resource = _build_uri(self.resource, sources, targets)
         self.logger.debug("Will fetch quotes from {}".format(resource))
         try:

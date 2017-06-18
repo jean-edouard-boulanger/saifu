@@ -2,19 +2,19 @@ conf:
   log:
     category: mktpub
     location: /var/log/saifu/mktpub
-    level: INFO
+    level: DEBUG
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
     pull_delay: 10
-    db:
+    routing: pricing_queue
+    database:
       host: saifudb
-      schema: saifudb
-      creds:
+      database: saifudb
+      credentials:
         username: saifudb
         password: saifudb
     mq:
       host: rmq
-      exchange: pricingreqs
-      creds:
+      credentials:
         username: guest
         password: guest

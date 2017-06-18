@@ -2,14 +2,14 @@ conf:
   log:
     category: mktagg
     location: /var/log/saifu/mktagg
-    level: INFO
+    level: DEBUG
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
+    sub_exchange: mktupd
+    pub_exchange: mktaggupd
+    aggregation_window: 30
     mq:
       host: rmq
-      sub_exchange: mktupd
-      pub_exchange: mktaggupd
       creds:
         username: guest
         password: guest
-    agg_window: 30

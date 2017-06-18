@@ -1,6 +1,4 @@
 """Aggregates market data updates in a given time window"""
-import logging
-import time
 import sys
 import cPickle
 import threading
@@ -11,33 +9,7 @@ import yaml
 import pika
 
 from saifu.core import utils, models, runtime
-
-def _exchange_connect(settings):
-    """Creates a connection to message queue broker from settings"""
-    conn = pika.BlockingConnection(
-        pika.ConnectionParameters(
-            host=settings.mq_host,
-            credentials=pika.credentials.PlainCredentials(
-                username=settings.mq_creds["username"],
-                password=settings.mq_creds["password"])))
-    return conn
-
-
-class Aggregation(object):
-    def __init__(self):
-        self.agg = {}
-
-    def insert(self, quote):
-        """Inserts quote in the aggregation"""
-        self.agg[quote.ticker] = quote
-
-    def get_all(self):
-        """Returns a copy of the current aggregation"""
-        return copy.deepcopy(self.agg)
-
-    def clear(self):
-        """Clear the current aggregation"""
-        self.agg = {}
+from saifu.core.system import mq, mt
 
 
 class Settings(object):
@@ -45,144 +17,105 @@ class Settings(object):
     def __init__(self, store):
         conf = store["conf"]
 
-        log = conf["log"]
         self.logging = models.LoggingSettings()
-        self.logging.from_json(log)
+        self.logging.from_json(conf["logging"])
 
         app = conf["app"]
-        self.agg_window = app["agg_window"]
+        self.aggregation_window = app["aggregation_window"]
+        self.pub_exchange = app["pub_exchange"]
+        self.sub_exchange = app["sub_exchange"]
 
-        mqc = app["mq"]
-        self.mq_host = mqc["host"]
-        self.mq_creds = mqc["creds"]
-        self.mq_sub_exchange = mqc["sub_exchange"]
-        self.mq_pub_exchange = mqc["pub_exchange"]
+        self.mq = models.MQSettings()
+        self.mq.from_json(app["mq"])
 
 
-class Subscriber(threading.Thread):
-    """Asynchronously subscribes to quotes updates and aggregates data"""
-    def __init__(self, logger, settings, callback):
-        super(Subscriber, self).__init__()
+class QuoteAggregation(object):
+    """Aggregates quotes over a period of time"""
+    def __init__(self):
+        self.agg = {}
+
+    def insert(self, quote):
+        """Inserts a quote in the aggregation"""
+        self.agg[quote.ticker] = quote
+
+    def get_all(self):
+        """Returns a copy of the current aggregation"""
+        return copy.deepcopy(self.agg)
+
+    def reset(self):
+        """Clears the current aggregation"""
+        self.agg = {}
+
+
+class WindowAggregator(object):
+    """Aggregates data over a pre-defined period of time"""
+    def __init__(self, logger, window_size, callback):
         self.logger = logger
-        self.settings = settings
+        self.window_size = window_size
         self.callback = callback
+        self.aggregation = QuoteAggregation()
+        self.window_end = utils.utc_time()
 
-        self.agg = Aggregation()
-        self.nextbatch = utils.utc_time_with_offset(
-            datetime.timedelta(seconds=self.settings.agg_window))
+    def next_window(self):
+        """Find the end of the next window from the current time"""
+        return utils.utc_time_with_offset(
+            datetime.timedelta(seconds=self.window_size))
 
-        self.connection = None
-        self.channel = None
-        self.working = True
+    def is_window_end(self):
+        """Determines if the current aggregation window is finished"""
+        return utils.utc_time() > self.window_end
 
-    def _connect(self):
-        self.connection = _exchange_connect(self.settings)
-        self.channel = self.connection.channel()
-        self.channel.exchange_declare(
-            exchange=self.settings.mq_sub_exchange,
-            type='fanout')
-        return self.connection, self.channel
-
-    def _handle_batch_end(self):
-        self.logger.debug(
-            "End of current aggregation window (ts={})".format(
-                self.nextbatch))
-
-        agg = self.agg.get_all()
-        self.agg.clear()
-
-        self.logger.debug("Updating publisher with {} update(s)".format(
-            len(agg)))
-
-        self.nextbatch = utils.utc_time_with_offset(
-            datetime.timedelta(seconds=self.settings.agg_window))
-
-        self.callback(agg)
-
-    def _received(self, channel, method, properties, body):
-        """Callback when message received"""
-        quote = cPickle.loads(body)
-        self.logger.debug("Received update for currency pair {}@{}".format(
-            quote.ticker,
-            quote.price))
-
-        self.agg.insert(quote)
-
-        if utils.utc_time() >= self.nextbatch:
-            self._handle_batch_end()
-
-    def stop(self):
-        """Stops the subscriber thread"""
-        self.working = False
-        self.channel.stop_consuming()
-
-    def run(self):
-        while self.working:
-            try:
-                self.logger.info("Subscriber connecting to MQ broker")
-                _, channel = self._connect()
-                queue_name = channel.queue_declare(exclusive=True).method.queue
-                channel.basic_consume(self._received, queue=queue_name, no_ack=True)
-                channel.queue_bind(
-                    exchange=self.settings.mq_sub_exchange,
-                    queue=queue_name)
-
-                channel.start_consuming()
-            except pika.exceptions.ConnectionClosed:
-                self.logger.warn("Lost connection with MQ, will reconnect")
-
-        self.logger.warn("Subscriber is going down")
+    def aggregate(self, quote):
+        """Aggregates a new piece of data
+        Calls the callback with the full aggregation if the current window is
+        finished.
+        """
+        self.aggregation.insert(quote)
+        if self.is_window_end():
+            self.logger.debug("End of current aggregation window")
+            self.callback(self.aggregation.get_all())
+            self.aggregation.reset()
+            self.window_end = self.next_window()
 
 
-class Publisher(threading.Thread):
-    """Asynchronously publishes aggregated data updates"""
-    def __init__(self, logger, settings):
-        super(Publisher, self).__init__()
+class Subscriber(mq.GenericSubscriber):
+    """Asynchronously subscribes to quotes updates and aggregates market data"""
+    def __init__(self, logger, exchange, aggregator, connector):
+        super(Subscriber, self).__init__(exchange, connector)
         self.logger = logger
-        self.settings = settings
+        self.aggregator = aggregator
+        self.logger.info("Quotes subscriber is ready")
+
+    def received(self, message):
+        quote = cPickle.loads(message)
+        self.logger.debug("Received quote {}@{}".format(
+            quote.ticker, quote.price))
+
+        self.aggregator.aggregate(quote)
+
+class Publisher(mq.GenericPublisher):
+    """publishes aggregated data updates to exchange"""
+    def __init__(self, logger, exchange, connector):
+        super(Publisher, self).__init__(exchange, connector)
+        self.logger = logger
         self.queue = Queue.Queue()
-        self.working = True
+        self.logger.info("Aggregated quotes publisher is ready")
 
-    def _connect(self):
-        connection = _exchange_connect(self.settings)
-        channel = connection.channel()
-        channel.exchange_declare(
-            exchange=self.settings.mq_pub_exchange,
-            type='fanout')
-        return connection, channel
+    def notify(self, quote):
+        """Notifies the publisher about a new quote"""
+        self.queue.put(quote)
 
-    def _do_run(self, channel):
+    def work(self):
         wait = 5
-        while True:
+        while self.running():
             try:
-                updates = self.queue.get(timeout=wait)
-                self.logger.debug("Will publish update for {} pairs".format(
-                    len(updates)))
-                channel.basic_publish(
-                    exchange=self.settings.mq_pub_exchange,
-                    routing_key='',
-                    body=cPickle.dumps(updates.values()))
+                quotes = self.queue.get(timeout=wait)
+                self.logger.debug("Will publish {} quote updates".format(
+                    len(quotes)))
+
+                self.publish(cPickle.dumps(quotes.values()))
             except Queue.Empty:
                 self.logger.debug("Queue is empty after {}s".format(wait))
-
-    def stop(self):
-        """Stops the publisher thread"""
-        self.working = False
-
-    def notify(self, update):
-        """Notifies the publisher with an update"""
-        self.queue.put(update)
-
-    def run(self):
-        while self.working:
-            try:
-                self.logger.info("Publisher connecting to MQ broker")
-                _, channel = self._connect()
-                self._do_run(channel)
-            except pika.exceptions.ConnectionClosed:
-                self.logger.warn("Lost connection with MQ, will reconnect")
-
-        self.logger.info("Publisher is going down")
 
 def main():
     """Application entry-point"""
@@ -195,31 +128,23 @@ def main():
 
     logger.info("Initializing mktagg")
 
-    threads = []
-
     logger.info("Initializing market data publisher")
-    publisher = Publisher(logger, settings)
-    threads.append(publisher)
+    publisher = Publisher(
+        logger.getChild("pub"),
+        settings.pub_exchange,
+        mq.Connector(settings.mq))
 
     logger.info("Initializing market data subscriber")
-    subscriber = Subscriber(logger, settings, publisher.notify)
-    threads.append(subscriber)
+    subscriber = Subscriber(
+        logger.getChild("sub"),
+        settings.sub_exchange,
+        WindowAggregator(
+            logger.getChild("wagg"),
+            settings.aggregation_window,
+            publisher.notify),
+        mq.Connector(settings.mq))
 
-    logger.info("Starting worker threads")
-    for worker in threads:
-        worker.start()
-
-    logger.info("Market data aggregator is ready to operate")
-
-    should_monitor = True
-    while should_monitor:
-        if not all([t.isAlive() for t in threads]):
-            logger.warn("Detected a thread died, stopping mktagg")
-            for worker in threads:
-                worker.stop()
-            should_monitor = False
-        else:
-            time.sleep(5)
+    mt.ThreadManager(subscriber, publisher).start()
 
 if __name__ == "__main__":
     main()

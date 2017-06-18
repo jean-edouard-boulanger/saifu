@@ -1,19 +1,19 @@
 conf:
-  log:
+  logging:
     category: ingesticks
     location: /var/log/saifu/ingesticks
     level: DEBUG
     format: '%(asctime)s [%(levelname)s] [@%(name)s] %(message)s'
   app:
-    db:
+    exchange: mktaggupd
+    database:
       host: saifudb
-      schema: saifudb
-      creds:
+      database: saifudb
+      credentials:
         username: saifudb
         password: saifudb
     mq:
       host: rmq
-      exchange: mktaggupd
-      creds:
+      credentials:
         username: guest
         password: guest

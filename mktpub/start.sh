@@ -14,7 +14,7 @@ export CFG_FILE_PATH
 
 if [ -z "$MKTPUB_PROCS" ]
 then
-    MKTPUB_PROCS=4
+    MKTPUB_PROCS=1
 fi
 
 SOURCES=$(head -n1 tickers)

@@ -2,66 +2,44 @@
 import sys
 import time
 import uuid
-import logging
 import datetime
-import psycopg2
-import psycopg2.extras
 import pika
 import yaml
 
-from saifu.core import models, utils, runtime
-
-def _exchange_connect(settings):
-    """Creates a connection to message queue broker from settings"""
-    conn = pika.BlockingConnection(
-        pika.ConnectionParameters(
-            host=settings.mq_host,
-            credentials=pika.credentials.PlainCredentials(
-                username=settings.mq_creds["username"],
-                password=settings.mq_creds["password"])))
-    return conn, conn.channel()
-
-def _db_connect(settings):
-    return psycopg2.connect(
-        database=settings.db_schema,
-        user=settings.db_creds["username"],
-        password=settings.db_creds["password"],
-        host=settings.db_host)
+from saifu.core import models, runtime
+from saifu.core.system import db, mq
 
 class Settings(object):
     """Application settings"""
     def __init__(self, store):
         conf = store["conf"]
-
-        log = conf["log"]
-        self.logging = models.LoggingSettings()
-        self.logging.from_json(log)
-
         app = conf["app"]
+
         self.pull_delay = app["pull_delay"]
+        self.routing = app["routing"]
 
-        app = conf["app"]
-        dbc = app["db"]
-        self.db_host = dbc["host"]
-        self.db_schema = dbc["schema"]
-        self.db_creds = dbc["creds"]
+        self.logging = models.LoggingSettings()
+        self.logging.from_json(conf["log"])
 
-        mqc = app["mq"]
-        self.mq_host = mqc["host"]
-        self.mq_exchange = mqc["exchange"]
-        self.mq_creds = mqc["creds"]
+        self.database = models.DatabaseSettings()
+        self.database.from_json(app["database"])
+
+        self.mq = models.MQSettings()
+        self.mq.from_json(app["mq"])
 
 
 class Dispatcher(object):
-    def __init__(self, logger, settings):
+    def __init__(self, logger, connector, route):
         self.logger = logger
-        self.settings = settings
-        self.connection = None
-        self.exchange = None
+        self.connector = connector
+        self.route = route
+
+        self.channel = None
         self._connect()
 
     def _connect(self):
-        self.connection, self.channel = _exchange_connect(self.settings)
+        connection = self.connector.connect()
+        self.channel = connection.channel()
         self.channel.queue_declare(queue='pricing_queue', durable=True)
 
     def dispatch(self, job):
@@ -69,7 +47,7 @@ class Dispatcher(object):
         try:
             self.channel.basic_publish(
                 exchange='',
-                routing_key='pricing_queue',
+                routing_key=self.route,
                 body={},
                 properties=pika.BasicProperties(delivery_mode=2))
         except pika.exceptions.ConnectionClosed:
@@ -84,9 +62,8 @@ class PricingJob(object):
         self.snapshot_time = snapshot_time
 
 class Accessor(object):
-    def __init__(self, logger, settings):
-        self.connection = _db_connect(settings)
-        self.connection.set_session(readonly=False, autocommit=True)
+    def __init__(self, logger, connector):
+        self.connection = connector.connect()
         self.logger = logger
 
     def find_dirty_portfolios(self):
@@ -106,13 +83,14 @@ class Accessor(object):
                                        to_timestamp(0)
                                ))) > spps.pricing_interval
         """
-        cursor = self.connection.cursor()
-        cursor.execute(query)
-        rows = cursor.fetchall()
+        with self.connection.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
 
-        for row in rows:
-            yield row[0]
-        cursor.close()
+            for row in rows:
+                yield row[0]
+
+            self.connection.commit()
 
     def persist_job(self, job):
         """Will persist a job in the database"""
@@ -124,27 +102,26 @@ class Accessor(object):
         assert job.portfolio_id is not None
         assert job.snapshot_time is not None
 
-        cursor = self.connection.cursor()
-
-        if is_update:
-            assert False
-        else:
-            query = """
-                INSERT INTO saifu_portfolio_pricing_jobs
-                    (id, portfolio_id, status, started_by, snapshot_time)
-                VALUES
-                    (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(
-                query,
-                (
-                    job.identifier,
-                    job.portfolio_id,
-                    "N",
-                    "SCHEDULER",
-                    job.snapshot_time
-                ))
-            cursor.close()
+        with self.connection.cursor() as cursor:
+            if is_update:
+                assert False
+            else:
+                query = """
+                    INSERT INTO saifu_portfolio_pricing_jobs
+                        (id, portfolio_id, status, started_by, snapshot_time)
+                    VALUES
+                        (%s, %s, %s, %s, %s)
+                """
+                cursor.execute(
+                    query,
+                    (
+                        job.identifier,
+                        job.portfolio_id,
+                        "N",
+                        "SCHEDULER",
+                        job.snapshot_time
+                    ))
+        self.connection.commit()
 
 def main():
     """Application entry-point"""
@@ -155,10 +132,13 @@ def main():
     settings = Settings(settings_data)
     logger = runtime.create_logger(settings.logging)
 
-    read_accessor = Accessor(logger, settings)
-    write_accessor = Accessor(logger, settings)
+    read_accessor = Accessor(logger, db.Connector(settings.database))
+    write_accessor = Accessor(logger, db.Connector(settings.database))
 
-    dispatcher = Dispatcher(logger, settings)
+    dispatcher = Dispatcher(
+        logger,
+        mq.Connector(settings.mq),
+        settings.routing)
 
     while True:
         logger.debug("Will fetch dirty portfolios and require pricing")
@@ -173,8 +153,8 @@ def main():
             dispatcher.dispatch(None)
             pricing_jobs_created += 1
 
-
-        logger.debug("Required pricing for {} portfolio(s)".format(pricing_jobs_created))
+        logger.debug("Required pricing for {} portfolio(s)".format(
+            pricing_jobs_created))
 
         time.sleep(settings.pull_delay)
 
