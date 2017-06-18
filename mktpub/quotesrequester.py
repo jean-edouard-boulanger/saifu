@@ -2,34 +2,16 @@
 import time
 import requests
 
+from saifu.core.models import Quote
+from saifu.core import utils
 
-class Quote(object):
-    """Represents a quote"""
-    def __init__(self, source, target, price, timestamp):
-        self.source = source
-        self.target = target
-        self.price = price
-        self.timestamp = timestamp
-
-    def serialize(self):
-        """Serializes the quote to a python dict"""
-        return {
-            "source": self.source,
-            "target": self.target,
-            "price": self.price,
-            "timestamp": self.timestamp
-        }
-
-
-def _get_timestamp():
-    """Returns the current timestamp in local time"""
-    return int(time.time())
 
 def _extract_pairs(timestamp, data):
     """Extract the currency pairs from a response"""
     for source, targets in data.iteritems():
         for target, price in targets.iteritems():
-            yield Quote(source, target, price, timestamp)
+            ticker = "{}{}".format(source, target)
+            yield Quote(ticker, price, timestamp)
 
 def _build_uri(base_uri, sources, targets):
     """Builds resource url from settings"""
@@ -93,7 +75,7 @@ class Requester(object):
                     "Service responded with an error ({})".format(
                         _get_message_from_response(data)))
 
-            for pair in _extract_pairs(_get_timestamp(), data):
+            for pair in _extract_pairs(utils.utc_time(), data):
                 yield pair
 
         except requests.exceptions.RequestException as error:

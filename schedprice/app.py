@@ -1,15 +1,15 @@
 """Determines which portfolios need pricing and dispatchs pricing"""
 import sys
-import json
 import time
 import uuid
 import logging
 import datetime
-import contextlib
 import psycopg2
 import psycopg2.extras
 import pika
 import yaml
+
+from saifu.core import models, utils, runtime
 
 def _exchange_connect(settings):
     """Creates a connection to message queue broker from settings"""
@@ -19,7 +19,7 @@ def _exchange_connect(settings):
             credentials=pika.credentials.PlainCredentials(
                 username=settings.mq_creds["username"],
                 password=settings.mq_creds["password"])))
-    return conn
+    return conn, conn.channel()
 
 def _db_connect(settings):
     return psycopg2.connect(
@@ -28,34 +28,14 @@ def _db_connect(settings):
         password=settings.db_creds["password"],
         host=settings.db_host)
 
-def _create_logger(settings):
-    """Creates the application logger from the settings"""
-    logger = logging.getLogger(settings.log_category)
-    logger.setLevel(logging.DEBUG)
-
-    sth = logging.StreamHandler()
-    sth.setLevel(logging.DEBUG)
-    formatter = logging.Formatter(settings.log_format)
-    sth.setFormatter(formatter)
-    logger.addHandler(sth)
-
-    return logger
-
-def _get_timestamp():
-    """Returns the current timestamp in local time"""
-    return int(time.time())
-
 class Settings(object):
     """Application settings"""
     def __init__(self, store):
         conf = store["conf"]
 
         log = conf["log"]
-        self.log_category = log["category"]
-        self.log_location = log["location"]
-        self.log_level = log["level"]
-        self.log_stdout_level = log["stdout_level"]
-        self.log_format = log["format"]
+        self.logging = models.LoggingSettings()
+        self.logging.from_json(log)
 
         app = conf["app"]
         self.pull_delay = app["pull_delay"]
@@ -73,9 +53,29 @@ class Settings(object):
 
 
 class Dispatcher(object):
-    def __init__(self):
-        pass
+    def __init__(self, logger, settings):
+        self.logger = logger
+        self.settings = settings
+        self.connection = None
+        self.exchange = None
+        self._connect()
 
+    def _connect(self):
+        self.connection, self.channel = _exchange_connect(self.settings)
+        self.channel.queue_declare(queue='pricing_queue', durable=True)
+
+    def dispatch(self, job):
+        """Dispatch pricing job"""
+        try:
+            self.channel.basic_publish(
+                exchange='',
+                routing_key='pricing_queue',
+                body={},
+                properties=pika.BasicProperties(delivery_mode=2))
+        except pika.exceptions.ConnectionClosed:
+            self.logger.warn("Lost connection with MQ, trying to reconnect")
+            self._connect()
+            self.logger.info("Connection to MQ re-established")
 
 class PricingJob(object):
     def __init__(self, identifier=None, portfolio_id=None, snapshot_time=None):
@@ -153,10 +153,12 @@ def main():
         settings_data = yaml.load(settings_file)
 
     settings = Settings(settings_data)
-    logger = _create_logger(settings)
+    logger = runtime.create_logger(settings.logging)
 
     read_accessor = Accessor(logger, settings)
     write_accessor = Accessor(logger, settings)
+
+    dispatcher = Dispatcher(logger, settings)
 
     while True:
         logger.debug("Will fetch dirty portfolios and require pricing")
@@ -168,10 +170,11 @@ def main():
                 PricingJob(
                     portfolio_id=portfolio_id,
                     snapshot_time=snapshot_time))
+            dispatcher.dispatch(None)
             pricing_jobs_created += 1
-            pass
 
-        logger.debug("Required pricing for {} jobs".format(pricing_jobs_created))
+
+        logger.debug("Required pricing for {} portfolio(s)".format(pricing_jobs_created))
 
         time.sleep(settings.pull_delay)
 

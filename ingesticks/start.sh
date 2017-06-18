@@ -1,7 +1,7 @@
 #!/bin/bash
 
 CFG_FILE_PATH=./cfg.yaml
-if [[ "$INGESTICKS_ENV" -eq "dev" ]]
+if [ "$INGESTICKS_ENV" = "dev" ]
 then
     echo "[ WARN ] Will run ingesticks in DEV mode."
     CFG_FILE_PATH=./cfg_dev.yaml

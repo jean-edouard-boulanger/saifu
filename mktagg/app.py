@@ -2,7 +2,7 @@
 import logging
 import time
 import sys
-import json
+import cPickle
 import threading
 import Queue
 import copy
@@ -10,11 +10,7 @@ import datetime
 import yaml
 import pika
 
-
-def _get_timestamp():
-    """Returns the current timestamp in local time"""
-    return int(time.time())
-
+from saifu.core import utils, models, runtime
 
 def _exchange_connect(settings):
     """Creates a connection to message queue broker from settings"""
@@ -31,10 +27,9 @@ class Aggregation(object):
     def __init__(self):
         self.agg = {}
 
-    def insert(self, update):
+    def insert(self, quote):
         """Inserts quote in the aggregation"""
-        pair = "{}{}".format(update["source"], update["target"])
-        self.agg[pair] = update
+        self.agg[quote.ticker] = quote
 
     def get_all(self):
         """Returns a copy of the current aggregation"""
@@ -51,11 +46,8 @@ class Settings(object):
         conf = store["conf"]
 
         log = conf["log"]
-        self.log_category = log["category"]
-        self.log_location = log["location"]
-        self.log_level = log["level"]
-        self.log_stdout_level = log["stdout_level"]
-        self.log_format = log["format"]
+        self.logging = models.LoggingSettings()
+        self.logging.from_json(log)
 
         app = conf["app"]
         self.agg_window = app["agg_window"]
@@ -74,12 +66,14 @@ class Subscriber(threading.Thread):
         self.logger = logger
         self.settings = settings
         self.callback = callback
+
         self.agg = Aggregation()
-        self.nextbatch = _get_timestamp() + self.settings.agg_window
-        self.working = True
+        self.nextbatch = utils.utc_time_with_offset(
+            datetime.timedelta(seconds=self.settings.agg_window))
 
         self.connection = None
-        self.exchange = None
+        self.channel = None
+        self.working = True
 
     def _connect(self):
         self.connection = _exchange_connect(self.settings)
@@ -89,35 +83,33 @@ class Subscriber(threading.Thread):
             type='fanout')
         return self.connection, self.channel
 
+    def _handle_batch_end(self):
+        self.logger.debug(
+            "End of current aggregation window (ts={})".format(
+                self.nextbatch))
+
+        agg = self.agg.get_all()
+        self.agg.clear()
+
+        self.logger.debug("Updating publisher with {} update(s)".format(
+            len(agg)))
+
+        self.nextbatch = utils.utc_time_with_offset(
+            datetime.timedelta(seconds=self.settings.agg_window))
+
+        self.callback(agg)
+
     def _received(self, channel, method, properties, body):
         """Callback when message received"""
-        quote = json.loads(body)
-        self.logger.debug("Received update for currency pair {}{}@{} (ts={})".format(
-            quote["source"],
-            quote["target"],
-            quote["price"],
-            quote["timestamp"]
-        ))
+        quote = cPickle.loads(body)
+        self.logger.debug("Received update for currency pair {}@{}".format(
+            quote.ticker,
+            quote.price))
 
         self.agg.insert(quote)
 
-        if _get_timestamp() >= self.nextbatch:
-            self.logger.debug(
-                "End of current aggregation window (ts={})".format(
-                    self.nextbatch))
-
-            agg = self.agg.get_all()
-            self.agg.clear()
-
-            self.logger.debug("Updating publisher with {} update(s)".format(
-                len(agg)))
-
-            # Calling output callback
-            self.callback(agg)
-
-            self.nextbatch = _get_timestamp() + self.settings.agg_window
-            self.logger.debug("Next update scheduled from {}".format(
-                datetime.datetime.fromtimestamp(self.nextbatch)))
+        if utils.utc_time() >= self.nextbatch:
+            self._handle_batch_end()
 
     def stop(self):
         """Stops the subscriber thread"""
@@ -139,7 +131,7 @@ class Subscriber(threading.Thread):
             except pika.exceptions.ConnectionClosed:
                 self.logger.warn("Lost connection with MQ, will reconnect")
 
-        self.logger.info("Subscriber is going down")
+        self.logger.warn("Subscriber is going down")
 
 
 class Publisher(threading.Thread):
@@ -169,7 +161,7 @@ class Publisher(threading.Thread):
                 channel.basic_publish(
                     exchange=self.settings.mq_pub_exchange,
                     routing_key='',
-                    body=json.dumps(updates))
+                    body=cPickle.dumps(updates.values()))
             except Queue.Empty:
                 self.logger.debug("Queue is empty after {}s".format(wait))
 
@@ -192,20 +184,6 @@ class Publisher(threading.Thread):
 
         self.logger.info("Publisher is going down")
 
-def _create_logger(settings):
-    """Creates the application logger from the settings"""
-    logger = logging.getLogger(settings.log_category)
-    logger.setLevel(logging.DEBUG)
-
-    sth = logging.StreamHandler()
-    sth.setLevel(logging.DEBUG)
-    formatter = logging.Formatter(settings.log_format)
-    sth.setFormatter(formatter)
-    logger.addHandler(sth)
-
-    return logger
-
-
 def main():
     """Application entry-point"""
     path = sys.argv[1]
@@ -213,7 +191,7 @@ def main():
         settings_data = yaml.load(settings_file)
 
     settings = Settings(settings_data)
-    logger = _create_logger(settings)
+    logger = runtime.create_logger(settings.logging)
 
     logger.info("Initializing mktagg")
 

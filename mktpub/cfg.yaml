@@ -3,11 +3,13 @@ conf:
     category: mktpub
     location: /var/log/saifu/mktpub
     level: INFO
-    stdout_level: ERROR
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
     pull_delay: 10
     pub:
-      host: 163.172.141.210
+      host: rmq
       exchange: mktupd
+      creds:
+        username: guest
+        password: guest
     res: https://min-api.cryptocompare.com/data/pricemulti?fsyms={sources}&tsyms={targets}

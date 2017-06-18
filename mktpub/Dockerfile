@@ -1,2 +1,2 @@
-FROM python:2.7-onbuild
+FROM saifu/core
 CMD ["./start.sh"]

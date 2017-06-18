@@ -4,7 +4,7 @@ START_WAIT_TIME=5
 WAIT_INTERVAL=2
 
 
-if [[ "$MKTPUB_ENV" -eq "dev" ]]
+if [ "$MKTPUB_ENV" = "dev" ]
 then
     echo "[ WARN ] Will run mktpub in DEV mode."
     CFG_FILE_PATH=./cfg_dev.yaml
@@ -12,17 +12,17 @@ fi
 
 export CFG_FILE_PATH
 
-if [[ -z "$MKTPUB_PROCS" ]]
+if [ -z "$MKTPUB_PROCS" ]
 then
     MKTPUB_PROCS=4
 fi
 
-SOURCES=( $(head -n1 tickers) )
-TARGETS=( $(tail -n1 tickers) )
+SOURCES=$(head -n1 tickers)
+TARGETS=$(tail -n1 tickers)
 
-for SOURCE in "${SOURCES[@]}"
+for SOURCE in $SOURCES
 do
-    for TARGET in "${TARGETS[@]}"
+    for TARGET in $TARGETS
     do
         PAIRS="${SOURCE}_${TARGET} $PAIRS"
     done

@@ -2,8 +2,7 @@ conf:
   log:
     category: ingesticks
     location: /var/log/saifu/ingesticks
-    level: INFO
-    stdout_level: ERROR
+    level: DEBUG
     format: '%(asctime)s [%(levelname)s] [@%(name)s] %(message)s'
   app:
     db:

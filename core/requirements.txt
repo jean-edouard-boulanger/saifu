@@ -1,0 +1,3 @@
+pika>=0.10.0
+psycopg2
+pyyaml

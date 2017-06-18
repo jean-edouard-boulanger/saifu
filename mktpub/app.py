@@ -1,11 +1,13 @@
-"""Fetches currencies quotes and publishes them"""
+"""Fetches crypto currencies quotes and publishes them"""
 import logging
 import time
 import sys
-import json
+import cPickle
 import yaml
 import pika
+
 import quotesrequester
+from saifu.core import models, runtime
 
 
 def _exchange_connect(settings):
@@ -29,11 +31,8 @@ class Settings(object):
         conf = store["conf"]
 
         log = conf["log"]
-        self.log_category = log["category"]
-        self.log_location = log["location"]
-        self.log_level = log["level"]
-        self.log_stdout_level = log["stdout_level"]
-        self.log_format = log["format"]
+        self.logging = models.LoggingSettings()
+        self.logging.from_json(log)
 
         app = conf["app"]
         self.pull_delay = app["pull_delay"]
@@ -65,36 +64,21 @@ class Publisher(object):
             self.channel.basic_publish(
                 exchange=self.settings.pub_exchange,
                 routing_key='',
-                body=json.dumps(quote.serialize()))
+                body=cPickle.dumps(quote))
         except pika.exceptions.ConnectionClosed:
             self.logger.warn("Lost connection with MQ, trying to reconnect")
             self._connect()
             self.logger.info("Connection to MQ re-established")
 
-def create_logger(settings):
-    """Creates the application logger from the settings"""
-    logger = logging.getLogger(settings.log_category)
-    logger.setLevel(logging.DEBUG)
-
-    sth = logging.StreamHandler()
-    sth.setLevel(logging.DEBUG)
-    formatter = logging.Formatter(settings.log_format)
-    sth.setFormatter(formatter)
-    logger.addHandler(sth)
-
-    return logger
-
 def main_loop(logger, publisher, requester, pairs):
     """Main loop execution"""
     try:
-        for pair in requester.get(pairs):
-            logger.debug("Publishing currency pair {}{}@{} (ts={})".format(
-                pair.source,
-                pair.target,
-                pair.price,
-                pair.timestamp
-            ))
-            publisher.publish(pair)
+        for quote in requester.get(pairs):
+            logger.debug("Publishing quote to exchange {}@{}".format(
+                quote.ticker,
+                quote.price))
+
+            publisher.publish(quote)
     except quotesrequester.RequesterException as error:
         logger.warn("Failed to get quotes ({})".format(error))
 
@@ -106,7 +90,7 @@ def main():
         settings_data = yaml.load(settings_file)
 
     settings = Settings(settings_data)
-    logger = create_logger(settings)
+    logger = runtime.create_logger(settings.logging)
 
     logger.info("Initializing mktpub")
 

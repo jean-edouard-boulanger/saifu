@@ -1,12 +1,13 @@
 """Tick updates ingester (Updates saifudb with the last tick pricers)"""
 import sys
-import json
-import logging
+import cPickle
 import datetime
 import contextlib
 import psycopg2
 import pika
 import yaml
+
+from saifu.core import models, runtime
 
 def _exchange_connect(settings):
     """Creates a connection to message queue broker from settings"""
@@ -25,37 +26,15 @@ def _db_connect(settings):
         password=settings.db_creds["password"],
         host=settings.db_host)
 
-def _create_logger(settings):
-    """Creates the application logger from the settings"""
-    logger = logging.getLogger(settings.log_category)
-    logger.setLevel(logging.DEBUG)
-
-    sth = logging.StreamHandler()
-    sth.setLevel(logging.DEBUG)
-    formatter = logging.Formatter(settings.log_format)
-    sth.setFormatter(formatter)
-    logger.addHandler(sth)
-
-    return logger
-
-@contextlib.contextmanager
-def _profile(scope, logger):
-    start = datetime.datetime.now()
-    yield
-    end = datetime.datetime.now()
-    logger.debug("{} in {}s".format(scope, (end - start).microseconds / 1e6))
-
 
 class Config(object):
+    """Configuration for the current application"""
     def __init__(self, store):
         conf = store["conf"]
 
         log = conf["log"]
-        self.log_category = log["category"]
-        self.log_location = log["location"]
-        self.log_level = log["level"]
-        self.log_stdout_level = log["stdout_level"]
-        self.log_format = log["format"]
+        self.logging = models.LoggingSettings()
+        self.logging.from_json(log)
 
         app = conf["app"]
         dbc = app["db"]
@@ -85,10 +64,11 @@ class Subscriber(object):
         return connection, channel
 
     def _received(self, channel, method, properties, body):
-        updates = json.loads(body)
+        updates = cPickle.loads(body)
         self.ingester.ingest(updates)
 
     def run(self):
+        """Subscriber entry point"""
         while True:
             try:
                 self.logger.info("Connecting to MQ broker")
@@ -110,26 +90,21 @@ class Ingester(object):
         self.logger = logger
         self.connection = _db_connect(settings)
 
-    def ingest(self, updates):
+    def ingest(self, quotes):
         """Ingests the provided updates"""
         cursor = self.connection.cursor()
 
-        self.logger.debug("Will ingest {} updates".format(len(updates)))
-        with _profile("Ingested all updates", self.logger):
-            for ticker, update in updates.iteritems():
-                try:
-                    cursor.execute(
-                        """INSERT INTO saifu_ccy_historical_prices (
-                              ticker, price, quote_time)
-                                VALUES (%s, %s, %s)""",
-                        (ticker,
-                         update["price"],
-                         datetime.datetime.fromtimestamp(update["timestamp"]))
-                    )
-                except psycopg2.Error as err:
-                    self.logger.warn("Failed to persist ticker {}: {}".format(
-                        ticker, str(err)))
-            self.connection.commit()
+        self.logger.debug("Will ingest {} updates".format(len(quotes)))
+        for quote in quotes:
+            try:
+                cursor.execute(
+                    """INSERT INTO saifu_ccy_historical_prices (
+                          ticker, price, quote_time)
+                            VALUES (%s, %s, %s)""",
+                    (quote.ticker, quote.price, quote.timestamp))
+            except psycopg2.Error as err:
+                self.logger.warn("Failed to persist ticker {}: {}".format(
+                    quote.ticker, str(err)))
 
 
 def main():
@@ -139,7 +114,7 @@ def main():
         settings_data = yaml.load(settings_file)
 
     config = Config(settings_data)
-    logger = _create_logger(config)
+    logger = runtime.create_logger(config.logging)
 
     ingester = Ingester(logger, config)
 

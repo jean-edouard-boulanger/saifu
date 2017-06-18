@@ -3,7 +3,6 @@ conf:
     category: mktpub
     location: /var/log/saifu/mktpub
     level: INFO
-    stdout_level: ERROR
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
     pull_delay: 10
@@ -15,7 +14,7 @@ conf:
         password: saifudb
     mq:
       host: rmq
-      exchange: portprice
+      exchange: pricingreqs
       creds:
         username: guest
         password: guest

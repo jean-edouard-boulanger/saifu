@@ -2,8 +2,7 @@ conf:
   log:
     category: mktagg
     location: /var/log/saifu/mktagg
-    level: INFO
-    stdout_level: ERROR
+    level: DEBUG
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
     mq:
