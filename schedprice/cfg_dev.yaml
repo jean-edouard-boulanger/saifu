@@ -6,7 +6,7 @@ conf:
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
     pull_delay: 10
-    routing: pricing_queue
+    work_queue: pricing_queue
     database:
       host: saifudb
       database: saifudb

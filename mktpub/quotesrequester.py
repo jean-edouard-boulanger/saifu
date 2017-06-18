@@ -24,14 +24,14 @@ def _build_uri(base_uri, sources, targets):
 
 def _is_error_response(response):
     """Returns true if the response returned by the provider is an error"""
-    return "Response" in response and response["Response"] == "Error"
+    return "Response" in response and str(response["Response"]) == "Error"
 
 
 def _get_message_from_response(response):
     """Extracts the message from the provider response"""
     if "Message" not in response:
         return "unknown"
-    return response["Message"]
+    return str(response["Message"])
 
 def _extract_sources_targets(pairs):
     sources = set()

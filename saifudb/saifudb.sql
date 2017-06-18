@@ -23,6 +23,7 @@ CREATE TABLE saifu_portfolio_positions (
 CREATE TABLE saifu_portfolio_historical_prices (
     portfolio_id int REFERENCES saifu_portfolios(id),
     price DOUBLE PRECISION NOT NULL CHECK(price >= 0),
+    currency VARCHAR(30) NOT NULL,
     quote_time TIMESTAMP
 );
 
@@ -30,6 +31,7 @@ CREATE TABLE saifu_portfolio_pricing_jobs (
     id CHAR(32) PRIMARY KEY,
     portfolio_id int REFERENCES saifu_portfolios(id),
     status CHAR(1) NOT NULL,
+    target_ccy VARCHAR(30) NOT NULL,
     started_by VARCHAR(255) NOT NULL,
     snapshot_time TIMESTAMP NOT NULL,
     start_time TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -38,7 +40,8 @@ CREATE TABLE saifu_portfolio_pricing_jobs (
 
 CREATE TABLE saifu_portfolio_pricing_settings (
     portfolio_id int REFERENCES saifu_portfolios(id),
-    pricing_interval int NOT NULL
+    pricing_interval int NOT NULL,
+    target_ccy VARCHAR(30)
 );
 
 CREATE TABLE saifu_ccy_historical_prices (

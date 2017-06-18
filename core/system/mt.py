@@ -6,10 +6,17 @@ class ThreadManager(object):
     def __init__(self, *threads):
         self.threads = threads
 
+    def _monitor_one(self, thread):
+        thread.join()
+
     def _monitor(self):
         """Monitors a group of threads
         If one of the monitored threads goes down, all the threads are stopped.
         """
+        if len(self.threads) == 1:
+            self._monitor_one(self.threads[0])
+            return
+
         all_alive = True
         while all_alive:
             if not all([t.isAlive() for t in self.threads]):

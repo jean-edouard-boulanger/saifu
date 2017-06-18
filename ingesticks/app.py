@@ -8,7 +8,7 @@ import pika
 import yaml
 
 from saifu.core import models, runtime
-from saifu.core.system import mq, db
+from saifu.core.system import mq, db, mt
 
 class Settings(object):
     """Configuration for the current application"""
@@ -26,38 +26,6 @@ class Settings(object):
 
         self.mq = models.MQSettings()
         self.mq.from_json(app["mq"])
-
-
-class Subscriber(object):
-    """Receives ticker updates and persists them"""
-    def __init__(self, logger, connector, ingester, exchange):
-        self.logger = logger
-        self.exchange = exchange
-        self.ingester = ingester
-        self.connector = connector
-
-    def _connect(self):
-        self.logger.info("Connecting to MQ broker")
-        connection = self.connector.connect()
-        channel = connection.channel()
-        channel.exchange_declare(exchange=self.exchange, type='fanout')
-        return channel
-
-    def _received(self, channel, method, properties, body):
-        updates = cPickle.loads(body)
-        self.ingester.ingest(updates)
-
-    def run(self):
-        """Subscriber entry point"""
-        while True:
-            try:
-                channel = self._connect()
-                queue_name = channel.queue_declare(exclusive=True).method.queue
-                channel.basic_consume(self._received, queue=queue_name, no_ack=True)
-                channel.queue_bind(exchange=self.exchange, queue=queue_name)
-                channel.start_consuming()
-            except pika.exceptions.ConnectionClosed:
-                self.logger.warn("Lost connection with MQ, will reconnect")
 
 
 class Ingester(object):
@@ -82,6 +50,18 @@ class Ingester(object):
                         quote.ticker, str(err)))
 
 
+class Subscriber(mq.GenericSubscriber):
+    """Subscribes to quote updates and ingests them"""
+    def __init__(self, logger, exchange, connector, ingester):
+        super(Subscriber, self).__init__(exchange, connector)
+        self.logger = logger
+        self.ingester = ingester
+
+    def received(self, message):
+        self.ingester.ingest(
+            cPickle.loads(message))
+
+
 def main():
     """Application entry-point"""
     path = sys.argv[1]
@@ -91,15 +71,15 @@ def main():
     settings = Settings(settings_data)
     logger = runtime.create_logger(settings.logging)
 
-    ingester = Ingester(logger, db.Connector(settings.database))
-
     subscriber = Subscriber(
-        logger,
+        logger.getChild("sub"),
+        settings.exchange,
         mq.Connector(settings.mq),
-        ingester,
-        settings.exchange)
+        Ingester(
+            logger.getChild("ingest"),
+            db.Connector(settings.database)))
 
-    subscriber.run()
+    mt.ThreadManager(subscriber).start()
 
 if __name__ == '__main__':
     main()
