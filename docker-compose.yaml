@@ -49,3 +49,11 @@ services:
     depends_on:
       - rmq
       - saifudb
+  portprice:
+    build: ./portprice
+    image: saifu/portprice
+    environment:
+      PORTPRICE_ENV: dev
+      PORTPRICE_PROCS: 5
+    depends_on:
+      - rmq

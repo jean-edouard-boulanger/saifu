@@ -1,11 +1,10 @@
 conf:
   log:
-    category: schedprice
-    location: /var/log/saifu/schedprice
+    category: portprice
+    location: /var/log/saifu/portpricer
     level: DEBUG
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:
-    pull_delay: 10
     work_queue: pricing_queue
     database:
       host: saifudb

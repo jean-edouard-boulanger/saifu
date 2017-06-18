@@ -1,7 +1,7 @@
 conf:
   log:
-    category: mktpub
-    location: /var/log/saifu/mktpub
+    category: schedprice
+    location: /var/log/saifu/schedprice
     level: DEBUG
     format: '%(asctime)s [%(levelname)s] [@%(name)s] (%(process)d) %(message)s'
   app:

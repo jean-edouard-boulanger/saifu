@@ -3,7 +3,6 @@ import sys
 import time
 import uuid
 import datetime
-import cPickle
 import pika
 import yaml
 
@@ -55,7 +54,8 @@ class Dispatcher(mq.GenericDispatcher):
 
             self.jobsrepo.persist_many(new_jobs)
             for job in new_jobs:
-                self.dispatch(cPickle.dumps(job))
+                self.dispatch(
+                    utils.serialize(job))
 
             time.sleep(self.settings.pull_delay)
 

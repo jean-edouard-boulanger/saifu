@@ -151,8 +151,7 @@ class GenericDispatcher(_GenericMQAgent):
 
     def _initialize(self):
         """Publisher agent initialization (internal)"""
-        self._get_channel().queue_declare(
-            queue=self._queue, durable=True)
+        self._get_channel().exchange_declare(exchange="Direct-X", exchange_type="direct")
 
     def _dispatch(self):
         """Calls into work implementation"""
@@ -161,11 +160,9 @@ class GenericDispatcher(_GenericMQAgent):
     def dispatch(self, job):
         """Dispatch a job to the queue"""
         self._get_channel().basic_publish(
-            exchange='',
-            routing_key=self._queue,
-            body=job,
-            properties=pika.BasicProperties(
-                delivery_mode = 2))
+            exchange="Direct-X",
+            routing_key="Key1",
+            body=job)
 
     def work(self):
         """Publisher implementation
@@ -178,20 +175,18 @@ class GenericWorker(_GenericMQAgent):
     A worker picks up work from a work queue and execute it
     """
     def __init__(self, queue, connector, reconnect=True):
-        super(GenericDispatcher, self).__init__(connector, reconnect)
+        super(GenericWorker, self).__init__(connector, reconnect)
         self._queue = queue
 
-    def _handle(ch, method, properties, body):
-        def ack_impl():
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-        self.handle(body, ack_impl)
+    def _handle(self, ch, method, properties, body):
+        self.handle(body)
 
     def _initialize(self):
         """Publisher agent initialization (internal)"""
-        self._get_channel().queue_declare(
-            queue=self._queue, durable=True)
-        self._get_channel().basic_qos(prefetch_count=1)
-        self._get_channel().basic_consume(self._handle, queue=self._queue)
+        self._get_channel().exchange_declare(exchange="Direct-X", exchange_type="direct")
+        self._get_channel().queue_declare(queue=self._queue, durable=True)
+        self._get_channel().queue_bind(exchange="Direct-X",queue=self._queue, routing_key="Key1")
+        self._get_channel().basic_consume(self._handle, queue=self._queue, no_ack=True)
 
     def _post_stop(self):
         """Stop consumming after stop is called"""

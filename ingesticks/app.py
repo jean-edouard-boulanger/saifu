@@ -1,13 +1,12 @@
 """Tick updates ingester (Updates saifudb with the last tick pricers)"""
 import sys
-import cPickle
 import datetime
 import contextlib
 import psycopg2
 import pika
 import yaml
 
-from saifu.core import models, runtime
+from saifu.core import models, runtime, utils
 from saifu.core.system import mq, db, mt
 
 class Settings(object):
@@ -48,6 +47,7 @@ class Ingester(object):
                 except psycopg2.Error as err:
                     self.logger.warn("Failed to persist ticker {}: {}".format(
                         quote.ticker, str(err)))
+            self.connection.commit()
 
 
 class Subscriber(mq.GenericSubscriber):
@@ -59,7 +59,7 @@ class Subscriber(mq.GenericSubscriber):
 
     def received(self, message):
         self.ingester.ingest(
-            cPickle.loads(message))
+            utils.unserialize(message, models.Quote))
 
 
 def main():

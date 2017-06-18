@@ -1,12 +1,11 @@
 """Fetches crypto currencies quotes and publishes them"""
 import time
 import sys
-import cPickle
 import yaml
 import pika
 
 import quotesrequester
-from saifu.core import models, runtime
+from saifu.core import models, runtime, utils
 from saifu.core.system import mq, mt
 
 
@@ -43,7 +42,7 @@ class Publisher(mq.GenericPublisher):
                     self.logger.debug("Publishing quote to exchange {}@{}".format(
                         quote.ticker,
                         quote.price))
-                    self.publish(cPickle.dumps(quote))
+                    self.publish(utils.serialize(quote))
                 time.sleep(self.settings.pull_delay)
             except quotesrequester.RequesterException as error:
                 self.logger.warn("Failed to get quotes ({})".format(error))

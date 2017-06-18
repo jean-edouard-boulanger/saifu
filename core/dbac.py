@@ -72,3 +72,24 @@ class PricingRepository(BaseRepository):
             results = [(row[0], row[1]) for row in cursor.fetchall()]
             self._get_conn().commit()
             return results
+
+    def get_portfolio_positions_prices(self, portfolio_id, snapshot_time, target_ccy):
+        query = """
+            SELECT schp.ticker,
+                   schp.price,
+                   spp.size,
+                   schp.quote_time
+              FROM saifu_ccy_historical_prices schp
+              JOIN saifu_portfolio_positions spp ON (spp.ticker || %s) = schp.ticker
+              JOIN (SELECT ticker, MAX(quote_time) quote_time
+                      FROM saifu_ccy_historical_prices
+                     WHERE quote_time <= %s
+                  GROUP BY ticker) schp_j ON (    schp.ticker = schp_j.ticker
+                                              AND schp.quote_time = schp_j.quote_time)
+             WHERE spp.portfolio_id = %s;
+        """
+        with self._get_conn().cursor() as cursor:
+            cursor.execute(query, (target_ccy, snapshot_time, portfolio_id))
+            results = [(row[0], row[1], row[2], row[3]) for row in cursor.fetchall()]
+            self._get_conn().commit()
+            return results

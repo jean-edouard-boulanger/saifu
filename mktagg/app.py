@@ -1,6 +1,5 @@
 """Aggregates market data updates in a given time window"""
 import sys
-import cPickle
 import threading
 import Queue
 import copy
@@ -87,7 +86,7 @@ class Subscriber(mq.GenericSubscriber):
         self.logger.info("Quotes subscriber is ready")
 
     def received(self, message):
-        quote = cPickle.loads(message)
+        quote = utils.unserialize(message, models.Quote)
         self.logger.debug("Received quote {}@{}".format(
             quote.ticker, quote.price))
 
@@ -113,7 +112,7 @@ class Publisher(mq.GenericPublisher):
                 self.logger.debug("Will publish {} quote updates".format(
                     len(quotes)))
 
-                self.publish(cPickle.dumps(quotes.values()))
+                self.publish(utils.serialize(quotes.values()))
             except Queue.Empty:
                 self.logger.debug("Queue is empty after {}s".format(wait))
 
