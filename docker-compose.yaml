@@ -57,3 +57,8 @@ services:
       PORTPRICE_PROCS: 1
     depends_on:
       - rmq
+  websrv:
+    build: ./websrv
+    image: saifu/websrv
+    ports:
+      - '80:5000'
