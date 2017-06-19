@@ -1,6 +1,6 @@
 #!/bin/bash
 CFG_FILE_PATH=./cfg.yaml
-START_WAIT_TIME=5
+START_WAIT_TIME=20
 WAIT_INTERVAL=2
 
 

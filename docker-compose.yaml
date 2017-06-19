@@ -1,4 +1,4 @@
-version: '3'
+version: '2'
 services:
   rmq:
     image: rabbitmq:3-management
@@ -23,7 +23,7 @@ services:
     image: saifu/mktpub
     environment:
       MKTPUB_ENV: dev
-      MKTPUB_PROCS: 2
+      MKTPUB_PROCS: 6
     depends_on:
       - rmq
   mktagg:
@@ -54,6 +54,6 @@ services:
     image: saifu/portprice
     environment:
       PORTPRICE_ENV: dev
-      PORTPRICE_PROCS: 5
+      PORTPRICE_PROCS: 1
     depends_on:
       - rmq

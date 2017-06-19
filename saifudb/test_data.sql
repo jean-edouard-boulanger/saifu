@@ -4,5 +4,6 @@ INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'X
 INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'XMR', 30.0);
 INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'XLM', 14000.0);
 INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'ETH', 25.0);
-INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'BTC', 0.71865);
+INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'BTC', 0.32241438);
+INSERT INTO saifu_portfolio_positions (portfolio_id, ticker, size) VALUES (1, 'ANS', 95.0);
 INSERT INTO saifu_portfolio_pricing_settings (portfolio_id, pricing_interval, target_ccy) VALUES (1, 60, 'USD');

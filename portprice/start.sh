@@ -12,7 +12,7 @@ then
     PORTPRICE_PROCS=1
 fi
 
-WAIT_TIME=5
+WAIT_TIME=20
 echo "[ WARN ] Waiting ${WAIT_TIME}s"
 sleep $WAIT_TIME
 
