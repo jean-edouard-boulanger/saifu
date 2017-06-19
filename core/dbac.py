@@ -78,7 +78,7 @@ class PricingRepository(BaseRepository):
             SELECT schp.ticker,
                    schp.price,
                    spp.size,
-                   schp.quote_time
+                   (schp.price * spp.size) as total
               FROM saifu_ccy_historical_prices schp
               JOIN saifu_portfolio_positions spp ON (spp.ticker || %s) = schp.ticker
               JOIN (SELECT ticker, MAX(quote_time) quote_time
@@ -90,6 +90,16 @@ class PricingRepository(BaseRepository):
         """
         with self._get_conn().cursor() as cursor:
             cursor.execute(query, (target_ccy, snapshot_time, portfolio_id))
-            results = [(row[0], row[1], row[2], row[3]) for row in cursor.fetchall()]
+            results = [[row[0], row[1], row[2], row[3]] for row in cursor.fetchall()]
             self._get_conn().commit()
             return results
+
+    def persist_portfolio_pricing(self, portfolio_id, snapshot_time, balance, target_ccy):
+        query = """
+            INSERT INTO saifu_portfolio_historical_prices
+                (portfolio_id, balance, currency, quote_time)
+                 VALUES (%s, %s, %s, %s)
+        """
+        with self._get_conn().cursor() as cursor:
+            cursor.execute(query, (portfolio_id, balance, target_ccy, snapshot_time))
+            self._get_conn().commit()

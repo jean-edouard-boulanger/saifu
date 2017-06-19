@@ -5,6 +5,7 @@ import uuid
 import datetime
 import pika
 import yaml
+import terminaltables
 
 from saifu.core import models, runtime, dbac, utils
 from saifu.core.system import db, mq, mt
@@ -43,15 +44,15 @@ class Worker(mq.GenericWorker):
             job.snapshot_time,
             job.target_ccy)
 
-        price = 0
-        for position in results:
-            price += position[1] * position[2]
+        balance = sum(pos[3] for pos in results)
+        self.logger.debug("Finished calculating balance for job {}: {} {}".format(
+            job.identifier, balance, job.target_ccy))
 
-        self.logger.debug("Job {} pricing results for portfolio {}: {} {}".format(
-            job.identifier,
+        self.pricingrepo.persist_portfolio_pricing(
             job.portfolio_id,
-            price,
-            job.target_ccy))
+            job.snapshot_time,
+            balance,
+            job.target_ccy)
 
 def main():
     """Application entry-point"""

@@ -22,7 +22,7 @@ CREATE TABLE saifu_portfolio_positions (
 
 CREATE TABLE saifu_portfolio_historical_prices (
     portfolio_id int REFERENCES saifu_portfolios(id),
-    price DOUBLE PRECISION NOT NULL CHECK(price >= 0),
+    balance DOUBLE PRECISION NOT NULL CHECK(balance >= 0),
     currency VARCHAR(30) NOT NULL,
     quote_time TIMESTAMP
 );
